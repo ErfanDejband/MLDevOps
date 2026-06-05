@@ -1,0 +1,6 @@
+mlflow
+ipykernel
+# libraries for simple machine learning and data processing
+scikit-learn
+pandas
+numpy
