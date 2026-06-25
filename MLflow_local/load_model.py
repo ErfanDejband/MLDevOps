@@ -21,11 +21,11 @@ def get_best_run_and_model_uri():
         experiment_names=["MLflow_Local_Experiment"],
         output_format="pandas"
     )
-    logger.info(f"{'='*50}")
+    logger.info(f"{'='*150}")
     logger.info("just for learning purpose: runs DataFrame columns:")
     logger.info(f"Total runs found: {len(runs)}")
     logger.info(f"Runs DataFrame:\n{runs[['run_id', 'metrics.validation_accuracy', 'params.max_iter']]}")
-    logger.info(f"{'='*50}")
+    logger.info(f"{'='*150}")
     runs["params.max_iter"] = pd.to_numeric(runs["params.max_iter"])
     best_run = runs.sort_values(
         by=["metrics.validation_accuracy", "params.max_iter"],
@@ -66,7 +66,28 @@ def test_best_model(model_uri):
     logger.info(f"Predicted labels: {y_pred}")
     logger.info(f"Actual labels: {y_test}")
 
+# use pyfunc method to load the model and test it with the test data
+def test_best_model_pyfunc(model_uri):
+    # Load the model using pyfunc
+    best_model_pyfunc = mlflow.pyfunc.load_model(model_uri)
+    logger.info("Best model loaded successfully using pyfunc!")
+
+    # Load test data
+    with open("test_data.pkl", "rb") as f:
+        X_test, y_test = pickle.load(f)
+    logger.info("Test data loaded from test_data.pkl")
+
+    # show the results in the dataframe format
+    y_pred = best_model_pyfunc.predict(X_test)
+    results_df = pd.DataFrame(X_test, columns=[f"feature_{i}" for i in range(X_test.shape[1])])
+    results_df["predicted_label"] = y_pred
+    results_df["actual_label"] = y_test
+    logger.info(f"Results DataFrame:\n{results_df[:10]}")  # Show only the first 10 rows for brevity
+    
+
 if __name__ == "__main__":
     mlflow.set_tracking_uri("http://localhost:5000")
     best_model_uri = get_best_run_and_model_uri()
     test_best_model(best_model_uri)
+    logger.info(f"{'='*150}")
+    test_best_model_pyfunc(best_model_uri)
