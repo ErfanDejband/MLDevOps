@@ -3,19 +3,64 @@
 ## Purpose of This Document
 
 This README serves **two purposes**:
-1. **For the developer (Erfan):** A step-by-step roadmap to build and understand the full MLOps pipeline incrementally.
+1. **For the developer:** A step-by-step roadmap to build and understand the full MLOps pipeline incrementally.
 2. **For AI agents:** A full picture of the architecture so each agent can develop a specific phase without losing context.
 
 ---
 
 ## Project Context
 
-The model being used is a **LogisticRegression on the Iris dataset**, already developed in `../MLflow_local/`. That folder contains:
-- `run_log_model.py` — trains models, logs to MLflow, saves test data to `test_data.pkl`
-- `load_model.py` — loads best model from MLflow, evaluates on hold-out test set
-- `MLflow_Guide.md` — MLflow API reference
+### Dataset: MNIST Handwriting Detection
+- 60,000 training images, 10,000 test images
+- 28×28 grayscale images, **10 classes** (digits 0–9)
+- Loaded via `tensorflow.keras.datasets.mnist` — no manual download needed
+- Split strategy: **70% train / 20% validation / 10% secret test**
 
-The goal of **this folder (CICD_MLops)** is to take that local work and wire it into a real CI/CD pipeline.
+### Two Teams, Two Models
+
+| Team | Model | Folder | Status |
+|------|-------|--------|--------|
+| **Team 1** | DNN (Dense Neural Network) | `team1_dnn/` | 🔲 Phase 1 |
+| **Team 2** | CNN (Convolutional Neural Network) | `team2_cnn/` | 🔲 Later |
+
+Both teams share the same CI/CD pipeline and MLflow server.  
+Each team uses a **separate MLflow experiment** so runs never mix.
+
+### Team 1 — Suggested DNN Architecture
+```
+Input: 784 (28×28 flattened)
+  ↓
+Dense(512, relu)
+  ↓
+Dropout(0.2)
+  ↓
+Dense(256, relu)
+  ↓
+Dropout(0.2)
+  ↓
+Dense(10, softmax)   ← probability per digit
+```
+Metrics to track: `val_accuracy`, `val_loss`, `test_accuracy`
+
+### Team 2 — Suggested CNN Architecture (implement later)
+```
+Input: (28, 28, 1)
+  ↓
+Conv2D(32, 3×3, relu) → MaxPooling2D
+  ↓
+Conv2D(64, 3×3, relu) → MaxPooling2D
+  ↓
+Flatten → Dense(128, relu) → Dropout(0.5)
+  ↓
+Dense(10, softmax)
+```
+
+### Reference: MLflow_local
+`../MLflow_local/` contains the Iris/sklearn experiment used to learn MLflow basics.
+All patterns there (3-way split, `infer_signature`, `log_model`, `compare_and_promote`)
+apply here — just with TensorFlow instead of sklearn.
+
+The goal of **this folder (CICD_MLops)** is to build a full production-grade MLOps pipeline.
 
 ---
 
@@ -127,30 +172,57 @@ Each phase builds on the previous. Develop one phase at a time.
 ### ✅ Phase 0 — Local MLflow (DONE)
 **Location:** `../MLflow_local/`
 
-- [x] Train LogisticRegression on Iris dataset
+- [x] Train LogisticRegression on Iris dataset (learning exercise)
 - [x] Log parameters, metrics, model to local MLflow
 - [x] 3-way split: 70% train / 20% validation / 10% test
 - [x] Save test data to `test_data.pkl`
 - [x] Load best model and evaluate on test set
 
+> This phase was for learning MLflow locally. The real project starts at Phase 1 with MNIST + TensorFlow.
+
 ---
 
-### 🔲 Phase 1 — Connect to Remote DEV MLflow Server (DagsHub)
-**Goal:** Replace `http://127.0.0.1:5000` with a real remote server that persists.
+### 🔲 Phase 1 — Team 1 DNN: Local Training + Remote MLflow (DagsHub)
+**Location:** `team1_dnn/`  
+**Goal:** Build the DNN training script for MNIST and log runs to DagsHub (remote MLflow).
+
+**One-time setup (manual, you do this):**
+- [ ] Create a [DagsHub](https://dagshub.com) account
+- [ ] Create a new repo on DagsHub called `mlops-dev-tracking`
+- [ ] Go to repo → **Remote** tab → **MLflow** → copy the tracking URI + token
+- [ ] Run `pip install dagshub tensorflow mlflow`
 
 **Tasks:**
-- [ ] Create a DagsHub account and a repo called `mlops-dev-tracking`
-- [ ] Get DagsHub MLflow tracking URI and credentials
-- [ ] Store credentials as environment variables (never hardcode)
-- [ ] Update `run_log_model.py` to use DagsHub URI
-- [ ] Run training and verify runs appear in DagsHub MLflow UI
-- [ ] Run `load_model.py` and verify it loads from remote
+- [ ] Create `team1_dnn/train.py`:
+  - Load MNIST via `keras.datasets.mnist`
+  - Apply 70/20/10 split
+  - Save 10% test split to `team1_dnn/secret_test_data.npz` (for CI pipeline later)
+  - Build DNN model (architecture above)
+  - Train with different hyperparameters (epochs, learning rate, dropout)
+  - Log params + metrics + model to DagsHub MLflow
+  - Use `mlflow.tensorflow.log_model(...)` with `name=` (not deprecated `artifact_path`)
+- [ ] Create `.env.example` showing required env vars
+- [ ] Create `team1_dnn/requirements.txt`
+- [ ] Verify: runs visible at `https://dagshub.com/<username>/mlops-dev-tracking.mlflow`
 
-**Key files to create:**
-- `phase1_remote_tracking/run_log_model_remote.py` — copy of run_log_model.py with remote URI
-- `.env.example` — template showing required env vars (no real values)
+**Key env vars needed (store in `.env`, never commit):**
+```bash
+MLFLOW_TRACKING_URI=https://dagshub.com/<username>/mlops-dev-tracking.mlflow
+MLFLOW_TRACKING_USERNAME=<dagshub_username>
+MLFLOW_TRACKING_PASSWORD=<dagshub_token>
+```
 
-**Expected result:** Runs visible at `https://dagshub.com/<username>/mlops-dev-tracking.mlflow`
+**Simplest DagsHub connection in code:**
+```python
+import dagshub
+import mlflow
+
+dagshub.init(repo_owner="<username>", repo_name="mlops-dev-tracking", mlflow=True)
+mlflow.set_experiment("team1_dnn_mnist")
+# Now mlflow.log_* goes to DagsHub automatically
+```
+
+**Expected result:** Training runs visible on DagsHub MLflow UI, model saved as artifact
 
 ---
 
@@ -205,8 +277,8 @@ Each phase builds on the previous. Develop one phase at a time.
 **Tasks:**
 - [ ] Create `app.py` with FastAPI:
   - `GET /health` → returns status
-  - `POST /predict` → accepts 4 Iris features, returns predicted class + probability
-  - On startup: loads `models:/iris_logistic_regression_model/Production` from PROD MLflow
+  - `POST /predict` → accepts 28×28 pixel array (784 values), returns predicted digit + confidence
+  - On startup: loads `models:/mnist_dnn/Production` from PROD MLflow
 - [ ] Test locally with `uvicorn app:app`
 - [ ] Create `Dockerfile` for containerized deployment
 - [ ] Deploy to **Render** (free tier) or **HuggingFace Spaces**
@@ -276,21 +348,24 @@ SECRET_TEST_DATA_B64=<base64 encoded CSV>
 ```
 CICD_MLops/
 ├── README.md                        ← this file
-├── requirements.txt
 ├── .env.example                     ← template, no real secrets
 ├── .github/
 │   └── workflows/
-│       └── train.yml                ← CI/CD pipeline definition
-├── phase1_remote_tracking/
-│   └── run_log_model_remote.py
-├── phase2_ci_pipeline/
-│   └── train_pipeline.py
-├── phase3_quality_gate/
-│   └── compare_and_promote.py
-├── phase4_serving/
-│   ├── app.py
+│       ├── train_dnn.yml            ← CI/CD pipeline for Team 1 (DNN)
+│       └── train_cnn.yml            ← CI/CD pipeline for Team 2 (CNN)
+├── team1_dnn/
+│   ├── train.py                     ← DNN training script (Phase 1)
+│   ├── compare_and_promote.py       ← quality gate (Phase 3)
+│   ├── secret_test_data.npz         ← held-out test set (NOT committed to git)
+│   └── requirements.txt
+├── team2_cnn/                       ← Phase later
+│   ├── train.py
+│   ├── compare_and_promote.py
+│   └── requirements.txt
+├── serving/
+│   ├── app.py                       ← FastAPI serving (Phase 4)
 │   └── Dockerfile
-└── phase5_monitoring/               ← future
+└── monitoring/                      ← Phase 5 (future)
 ```
 
 ---

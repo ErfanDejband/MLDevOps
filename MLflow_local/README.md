@@ -1,3 +1,18 @@
+# Introduction 
+Using ML devops tools
+
+# Getting Started
+0. cd to mlflow_local 
+1.	python -m venv .venv
+2.	pip install requirements.
+3. cd to Local_setup and run the scripts (1- run and log | 2- load model)
+4. see the database and mlartifacts
+
+
+# Contribute
+MLflow website: https://mlflow.org/
+
+
 # MLflow Complete Guide: Basics to Advanced
 
 ## Table of Contents
