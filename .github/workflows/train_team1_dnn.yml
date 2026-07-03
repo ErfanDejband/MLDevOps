@@ -52,13 +52,12 @@ jobs:
           echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team1_dnn/secret_test_data.npz
           echo "✅ Secret test data restored"
 
-      # ── 6. Quality Gate — find approved run, evaluate, promote if better ─
-      #   NOTE: Pipeline does NOT re-train. Developer trained locally,
-      #         picked the best run, tagged it approved=true, then pushed.
+      # ── 6. Quality Gate — evaluate Staging model, promote if better ─────
+      #   Pipeline does NOT re-train. Developer ran train.py locally,
+      #   which auto-saves artifact for best run and registers it to Staging.
+      #   Developer can adjust which version is Staging in MLflow UI before pushing.
       - name: Quality Gate — Evaluate & Promote
         env:
-          EXPERIMENT_NAME:  "team1_dnn_mnist"
-          MODEL_ARTIFACT:   "mnist_dnn_model"
           REGISTERED_NAME:  "mnist_classifier"
           SECRET_TEST_PATH: "CICD_MLops/team1_dnn/secret_test_data.npz"
         run: python CICD_MLops/compare_and_promote.py

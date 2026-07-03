@@ -70,62 +70,66 @@ The goal of **this folder (CICD_MLops)** is to build a full production-grade MLO
 ┌─────────────────────────────────────────────────────────────────┐
 │  DEVELOPER MACHINE                                              │
 │                                                                 │
-│  Runs experiments freely                                        │
-│  → All runs logged to DEV MLflow Server (DagsHub)              │
-│  → Developer compares runs in MLflow UI                        │
-│  → Picks best model, promotes to "Staging" in Model Registry   │
-│  → Pushes training CODE (not model) to GitHub                  │
+│  python train.py                                                │
+│  → Grid search: logs params + metrics for ALL runs (no artifact)│
+│  → After all runs: saves artifact for BEST run only            │
+│  → Auto-registers best model to "Staging" in Model Registry    │
+│                                                                 │
+│  Developer opens MLflow UI (DEV server):                       │
+│  → Compares all runs (val_accuracy, loss, dropout...)          │
+│  → If happy with auto-best → Staging stays as is               │
+│  → If prefers another run → change Staging in UI manually      │
+│                                                                 │
+│  git push → open Pull Request                                  │
 └────────────────────────────┬────────────────────────────────────┘
-                             │ git push
+                             │ PR triggers CI
                              ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  CI PIPELINE (GitHub Actions — free)                           │
 │                                                                 │
-│  Triggered on: push to main / pull request                     │
+│  Does NOT re-train. Model already lives in MLflow (DEV server) │
 │                                                                 │
-│  Step 1: Checkout code                                         │
-│  Step 2: Install dependencies                                  │
-│  Step 3: Re-train model (same script as developer used)        │
-│          → Logs to PROD MLflow Server (separate DagsHub repo)  │
-│  Step 4: Evaluate on SECRET test data (stored in GitHub        │
-│          Actions secret / separate secure location)            │
-│  Step 5: Compare new model accuracy vs current Production      │
-│  Step 6: If new model wins → promote to "Production"           │
-│          in PROD MLflow Model Registry                         │
-│          Else → pipeline FAILS, blocks merge                   │
+│  Step 1: Checkout code + install deps                          │
+│  Step 2: Restore secret test data (from GitHub secret)         │
+│  Step 3: Load Staging model from DEV MLflow Model Registry     │
+│  Step 4: Evaluate on SECRET test data (developer never sees)   │
+│  Step 5: Check minimum accuracy floor (e.g. 0.90)             │
+│  Step 6: Compare vs current Production model                   │
+│  Step 7: If Staging wins → promote to Production ✅            │
+│          If Staging loses → block PR ❌                        │
 └────────────────────────────┬────────────────────────────────────┘
                              │ model promoted to Production
                              ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  CD / DEPLOYMENT (Render or HuggingFace Spaces — free)         │
+│  CD / DEPLOYMENT (Phase 4 — Render or HuggingFace Spaces)      │
 │                                                                 │
-│  Pulls model from PROD MLflow Model Registry                   │
+│  Loads models:/mnist_classifier/Production from MLflow         │
 │  Serves predictions via FastAPI REST endpoint                  │
-│  /predict → returns class label + probability                  │
-└─────────────────────────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  MONITORING (future phase)                                      │
-│                                                                 │
-│  Track prediction drift over time                              │
-│  Alert if accuracy degrades                                    │
-│  Trigger retraining pipeline automatically                     │
+│  POST /predict → returns predicted digit + confidence          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Two-Server Strategy
+## Cross-Team Competition
 
-| | DEV MLflow Server | PROD MLflow Server |
-|---|---|---|
-| **Who writes** | Developers freely | Only CI/CD pipeline |
-| **Who reads** | All team members | Developers (read-only) |
-| **Purpose** | Experimentation, comparison | Official, auditable runs |
-| **Cleanup** | Periodically cleaned | Kept permanently |
-| **Hosted on** | DagsHub (free) | DagsHub (separate repo, free) |
-| **Access** | Dev credentials | CI/CD secrets only |
+Both teams use the **same registered model name** `mnist_classifier`.
+They compete for the same Production slot:
+
+```
+Team 1 trains DNN → registers to Staging → PR → pipeline evaluates → Production if better
+Team 2 trains CNN → registers to Staging → PR → pipeline evaluates → Production if better
+
+Winner = highest secret test accuracy, regardless of team or architecture
+```
+
+Each team has its own:
+- MLflow experiment (runs don't mix)
+- CI workflow file (triggers only on their folder changes)
+
+Both teams share:
+- `compare_and_promote.py` (quality gate logic)
+- `mnist_classifier` registered model name
 
 ---
 

@@ -2,14 +2,16 @@
 Shared Quality Gate — used by ALL teams' CI pipelines.
 
 IMPORTANT: The pipeline does NOT re-train the model.
-The developer trains locally (many combinations), picks the best run,
-tags it with approved=true, then pushes to trigger this pipeline.
+Developer trains locally (grid search), train.py auto-saves artifact for
+the best run and registers it to Staging in the Model Registry.
+Developer reviews MLflow UI — can change which version is Staging if preferred.
+Developer pushes code → this pipeline runs.
 
 This script:
-  1. Finds the run tagged approved=true in this team's experiment
-  2. Evaluates it on secret test data
+  1. Loads the current Staging model from the Model Registry
+  2. Evaluates it on secret test data (developer never sees this)
   3. Compares against current Production model
-  4. If better → promotes to Production
+  4. If better → promotes Staging to Production
   5. If worse  → blocks the PR
 
 Both Team 1 (DNN) and Team 2 (CNN) call this same script.
@@ -23,21 +25,14 @@ import mlflow.tensorflow
 from mlflow.client import MlflowClient
 
 # ── Config from env vars (set by each team's CI workflow) ────────────────────
-EXPERIMENT_NAME  = os.environ.get("EXPERIMENT_NAME")
-MODEL_ARTIFACT   = os.environ.get("MODEL_ARTIFACT")
 REGISTERED_NAME  = os.environ.get("REGISTERED_NAME", "mnist_classifier")
 SECRET_TEST_PATH = os.environ.get("SECRET_TEST_PATH", "secret_test_data.npz")
 MIN_ACCURACY     = float(os.environ.get("MIN_ACCURACY", "0.90"))
 
-if not EXPERIMENT_NAME or not MODEL_ARTIFACT:
-    print("❌ Missing required env vars: EXPERIMENT_NAME, MODEL_ARTIFACT")
-    sys.exit(1)
-
 client = MlflowClient()
 
 print(f"🔍 Quality Gate")
-print(f"   Team experiment : {EXPERIMENT_NAME}")
-print(f"   Competing for   : '{REGISTERED_NAME}' Production slot")
+print(f"   Registered model: '{REGISTERED_NAME}'")
 print(f"   Minimum accuracy: {MIN_ACCURACY}")
 print()
 
@@ -48,37 +43,36 @@ X_test = data["X_test"].astype("float32")
 y_test = data["y_test"]
 print(f"  {X_test.shape[0]} samples, classes: {sorted(set(y_test.tolist()))}")
 
-# ── 2. Find the developer-approved run ───────────────────────────────────────
-# Developer tagged the best run with approved=true before pushing
-print(f"\nSearching for approved run in '{EXPERIMENT_NAME}'...")
-runs = mlflow.search_runs(
-    experiment_names=[EXPERIMENT_NAME],
-    filter_string="tags.approved = 'true'",
-    order_by=["start_time DESC"],
-    max_results=1
-)
+# ── 2. Find the Staging model (developer set this in MLflow UI) ──────────────
+print(f"\nLooking for Staging version of '{REGISTERED_NAME}'...")
+staging_versions = client.get_latest_versions(REGISTERED_NAME, stages=["Staging"])
 
-if runs.empty:
-    print("❌ No approved run found!")
-    print("   Developer must tag the best run before pushing:")
-    print("   mlflow.set_tag('approved', 'true')  ← in MLflow UI or in code")
+if not staging_versions:
+    print("❌ No model in Staging!")
+    print("   Developer must run train.py locally first.")
+    print("   train.py auto-registers the best run to Staging.")
+    print("   Developer can also change which version is Staging in MLflow UI.")
     sys.exit(1)
 
-approved_run    = runs.iloc[0]
-approved_run_id = approved_run["run_id"]
-print(f"  Approved run ID : {approved_run_id}")
-print(f"  Val accuracy    : {approved_run.get('metrics.val_accuracy', 'N/A')}")
+staging_version = staging_versions[0]
+staging_run_id  = staging_version.run_id
+staging_run     = mlflow.get_run(staging_run_id)
+staging_team    = staging_run.data.tags.get("team", "unknown")
+print(f"  Staging version : v{staging_version.version}")
+print(f"  Team            : {staging_team}")
+print(f"  Val accuracy    : {staging_run.data.metrics.get('val_accuracy', 'N/A')}")
 
-# ── 3. Evaluate approved model on secret test data ───────────────────────────
-print("\nLoading approved model and evaluating on secret test data...")
-new_model    = mlflow.tensorflow.load_model(f"runs:/{approved_run_id}/{MODEL_ARTIFACT}")
-y_pred       = new_model.predict(X_test, verbose=0).argmax(axis=1)
-new_accuracy = float((y_pred == y_test).mean())
+# ── 3. Evaluate Staging model on secret test data ────────────────────────────
+print("\nLoading Staging model and evaluating on secret test data...")
+staging_model = mlflow.tensorflow.load_model(f"models:/{REGISTERED_NAME}/Staging")
+y_pred        = staging_model.predict(X_test, verbose=0).argmax(axis=1)
+new_accuracy  = float((y_pred == y_test).mean())
 print(f"  Secret test accuracy: {new_accuracy:.4f}")
 
 # ── 4. Hard floor check ──────────────────────────────────────────────────────
 if new_accuracy < MIN_ACCURACY:
     print(f"\n❌ FAILED: {new_accuracy:.4f} < minimum floor {MIN_ACCURACY}")
+    print("   Model is not good enough. Blocking deployment.")
     sys.exit(1)
 
 # ── 5. Get current Production model ─────────────────────────────────────────
@@ -95,36 +89,31 @@ else:
     print("\n  No Production model yet — this will be the first.")
 
 # ── 6. Compare ────────────────────────────────────────────────────────────────
-print(f"\n  Approved model : {new_accuracy:.4f}")
+print(f"\n  Staging model  : {new_accuracy:.4f}")
 print(f"  Production     : {prod_accuracy:.4f}")
 
 if new_accuracy <= prod_accuracy:
-    print(f"\n❌ FAILED: approved model ({new_accuracy:.4f}) does not beat Production ({prod_accuracy:.4f})")
+    print(f"\n❌ FAILED: Staging ({new_accuracy:.4f}) does not beat Production ({prod_accuracy:.4f})")
+    print("   Keeping current Production. Blocking merge.")
     sys.exit(1)
 
-# ── 7. Promote ───────────────────────────────────────────────────────────────
-print("\n✅ Approved model wins! Promoting to Production...")
+# ── 7. Promote Staging → Production ──────────────────────────────────────────
+print("\n✅ Staging model wins! Promoting to Production...")
 
-with mlflow.start_run(run_id=approved_run_id):
+# Log secret test accuracy to the run for future comparisons
+with mlflow.start_run(run_id=staging_run_id):
     mlflow.log_metric("secret_test_accuracy", new_accuracy)
-    mlflow.set_tag("approved", "false")  # clear tag so it can't be re-promoted accidentally
 
-all_versions = client.search_model_versions(f"name='{REGISTERED_NAME}'")
-new_version  = next((v for v in all_versions if v.run_id == approved_run_id), None)
-
-if new_version is None:
-    print(f"❌ No registered version found for run {approved_run_id}")
-    print(f"   Make sure train.py uses registered_model_name='{REGISTERED_NAME}'")
-    sys.exit(1)
-
+# Archive old Production
 if prod_versions:
     client.transition_model_version_stage(
         name=REGISTERED_NAME, version=prod_versions[0].version, stage="Archived"
     )
-    print(f"  Archived old Production (v{prod_versions[0].version})")
+    print(f"  Archived old Production (v{prod_versions[0].version}, team: {prod_team})")
 
+# Promote Staging to Production
 client.transition_model_version_stage(
-    name=REGISTERED_NAME, version=new_version.version, stage="Production"
+    name=REGISTERED_NAME, version=staging_version.version, stage="Production"
 )
-print(f"  🚀 '{REGISTERED_NAME}' v{new_version.version} is now Production!")
-print(f"     Secret test accuracy: {new_accuracy:.4f}")
+print(f"  🚀 '{REGISTERED_NAME}' v{staging_version.version} is now Production!")
+print(f"     Team: {staging_team} | Secret test accuracy: {new_accuracy:.4f}")
