@@ -41,7 +41,7 @@ def setup_mlflow():
     os.environ["MLFLOW_TRACKING_USERNAME"] = username or ""
     os.environ["MLFLOW_TRACKING_PASSWORD"] = password or ""
 
-    mlflow.set_experiment("team1_dnn_mnist_Experiment1")
+    mlflow.set_experiment("team1_dnn_mnist_Experiment2")
     logger.info(f"MLflow connected → {tracking_uri} ✅")
 
 
@@ -132,37 +132,71 @@ if __name__ == "__main__":
     keys, values = zip(*param_grid.items())
     all_param_combinations = [dict(zip(keys, v)) for v in product(*values)]
     logger.info(f"Total hyperparameter combinations to try: {len(all_param_combinations)}")
+    best_run_id      = None
+    best_val_accuracy = -1.0
+    best_model        = None
+    best_params       = None
+
     for i, params in enumerate(all_param_combinations):
         logger.info("=" * 55)
         logger.info(f"Run {i+1}/{len(all_param_combinations)} | Params: {params}")
 
         model, val_accuracy, val_loss = train(X_train, y_train, X_val, y_val, params)
 
-        # Name encodes the key params — unique and descriptive across multiple executions
         run_name = (
             f"dnn_e{params['epochs']}"
             f"_bs{params['batch_size']}"
             f"_lr{params['learning_rate']}"
             f"_dr{params['dropout_rate']}"
         )
-        with mlflow.start_run(run_name=run_name):
-            # Log all hyperparameters
+        with mlflow.start_run(run_name=run_name) as run:
             mlflow.log_params(params)
             mlflow.log_param("architecture", "Dense512-Drop-Dense256-Drop-Softmax10")
-
-            # Log validation metrics
             mlflow.log_metric("val_accuracy", val_accuracy)
             mlflow.log_metric("val_loss", val_loss)
-
             mlflow.set_tag("team", "team1_dnn")
             mlflow.set_tag("dataset", "mnist")
-            mlflow.set_tag("approved", "false")  # developer sets to 'true' for the best run
+            # No artifact saved here — only params + metrics to save storage
 
-            # ── NO model artifact saved during exploration ────────────────────
-            # Saves storage — artifact is only logged when developer approves this run.
-            # To approve after reviewing MLflow UI, run approve_run.py with the run_id.
+            logger.info(f"\tRun logged ✅ (params + metrics only)")
 
-            logger.info(f"\tRun logged ✅ (params + metrics only, no artifact)")
+            if val_accuracy > best_val_accuracy:
+                best_val_accuracy = val_accuracy
+                best_run_id       = run.info.run_id
+                best_model        = model
+                best_params       = params
 
+    # ── After all runs: save artifact ONLY for the best run ──────────────────
+    # Developer can then open MLflow UI, review all runs, and if they prefer
+    # a different run (e.g. same accuracy but smaller dropout), they can note
+    # that run_id and set the Staging version manually in the Model Registry UI.
     logger.info("=" * 55)
-    logger.info("All runs complete. View at: https://dagshub.com/e.dejband/mlops-dev-tracking.mlflow")
+    logger.info(f"Best run: {best_run_id} | Val accuracy: {best_val_accuracy:.4f}")
+    logger.info("Saving artifact for best run and registering to Staging...")
+
+    with mlflow.start_run(run_id=best_run_id):
+        sample_input  = X_val[:5].astype("float32")
+        sample_output = best_model.predict(sample_input, verbose=0)
+        signature     = infer_signature(sample_input, sample_output)
+
+        mlflow.tensorflow.log_model(
+            model=best_model,
+            name="mnist_dnn_model",
+            signature=signature,
+            input_example=sample_input,
+            registered_model_name="mnist_classifier"  # shared — all teams compete for same Production slot
+        )
+
+    # Transition the newly registered version to Staging
+    client = mlflow.MlflowClient()
+    all_versions  = client.search_model_versions("name='mnist_classifier'")
+    new_version   = next((v for v in all_versions if v.run_id == best_run_id), None)
+    if new_version:
+        client.transition_model_version_stage(
+            name="mnist_classifier", version=new_version.version, stage="Staging"
+        )
+        logger.info(f"✅ mnist_classifier v{new_version.version} → Staging")
+        logger.info("Review in MLflow UI. If you prefer a different run, update Staging manually.")
+        logger.info("When ready: git push + open PR to trigger the quality gate pipeline.")
+    
+    logger.info(f"View runs: https://dagshub.com/e.dejband/mlops-dev-tracking.mlflow")
