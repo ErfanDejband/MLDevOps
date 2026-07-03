@@ -167,36 +167,31 @@ if __name__ == "__main__":
                 best_params       = params
 
     # ── After all runs: save artifact ONLY for the best run ──────────────────
-    # Developer can then open MLflow UI, review all runs, and if they prefer
-    # a different run (e.g. same accuracy but smaller dropout), they can note
-    # that run_id and set the Staging version manually in the Model Registry UI.
     logger.info("=" * 55)
     logger.info(f"Best run: {best_run_id} | Val accuracy: {best_val_accuracy:.4f}")
-    logger.info("Saving artifact for best run and registering to Staging...")
+    logger.info("Saving artifact for best run and registering with 'staging' alias...")
 
     with mlflow.start_run(run_id=best_run_id):
         sample_input  = X_val[:5].astype("float32")
         sample_output = best_model.predict(sample_input, verbose=0)
         signature     = infer_signature(sample_input, sample_output)
 
-        mlflow.tensorflow.log_model(
+        model_info = mlflow.tensorflow.log_model(
             model=best_model,
             name="mnist_dnn_model",
             signature=signature,
             input_example=sample_input,
-            registered_model_name="mnist_classifier"  # shared — all teams compete for same Production slot
+            registered_model_name="mnist_classifier"
         )
 
-    # Transition the newly registered version to Staging
+    # Set 'staging' alias on the newly registered version (replaces deprecated Staging stage)
     client = mlflow.MlflowClient()
-    all_versions  = client.search_model_versions("name='mnist_classifier'")
-    new_version   = next((v for v in all_versions if v.run_id == best_run_id), None)
+    all_versions = client.search_model_versions("name='mnist_classifier'")
+    new_version  = next((v for v in all_versions if v.run_id == best_run_id), None)
     if new_version:
-        client.transition_model_version_stage(
-            name="mnist_classifier", version=new_version.version, stage="Staging"
-        )
-        logger.info(f"✅ mnist_classifier v{new_version.version} → Staging")
-        logger.info("Review in MLflow UI. If you prefer a different run, update Staging manually.")
+        client.set_registered_model_alias("mnist_classifier", "staging", new_version.version)
+        logger.info(f"✅ mnist_classifier v{new_version.version} → alias 'staging' set")
+        logger.info("Review in MLflow UI. To prefer a different run, set 'staging' alias manually.")
         logger.info("When ready: git push + open PR to trigger the quality gate pipeline.")
     
     logger.info(f"View runs: https://dagshub.com/e.dejband/mlops-dev-tracking.mlflow")

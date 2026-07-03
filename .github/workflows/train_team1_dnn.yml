@@ -11,13 +11,6 @@ on:
     paths:
       - "CICD_MLops/team1_dnn/**"
 
-# PROD MLflow credentials — injected from GitHub Secrets
-# Locally the same names are loaded from .env via python-dotenv
-env:
-  MLFLOW_TRACKING_URI:      ${{ secrets.MLFLOW_PROD_TRACKING_URI }}
-  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_PROD_USERNAME }}
-  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_PROD_TOKEN }}
-
 jobs:
   quality-gate:
     runs-on: ubuntu-latest
@@ -52,14 +45,20 @@ jobs:
           echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team1_dnn/secret_test_data.npz
           echo "✅ Secret test data restored"
 
-      # ── 6. Quality Gate — evaluate Staging model, promote if better ─────
-      #   Pipeline does NOT re-train. Developer ran train.py locally,
-      #   which auto-saves artifact for best run and registers it to Staging.
-      #   Developer can adjust which version is Staging in MLflow UI before pushing.
+      # ── 6. Quality Gate ───────────────────────────────────────────────────
+      # Reads 'staging' model from DEV server (where developer registered it)
+      # If it wins → registers + sets 'champion' alias on PROD server
       - name: Quality Gate — Evaluate & Promote
         env:
-          REGISTERED_NAME:  "mnist_classifier"
-          SECRET_TEST_PATH: "CICD_MLops/team1_dnn/secret_test_data.npz"
+          # DEV server — read staging model from here
+          MLFLOW_DEV_TRACKING_URI:      ${{ secrets.MLFLOW_DEV_TRACKING_URI }}
+          MLFLOW_DEV_USERNAME:          ${{ secrets.MLFLOW_DEV_USERNAME }}
+          MLFLOW_DEV_PASSWORD:          ${{ secrets.MLFLOW_DEV_PASSWORD }}
+          # PROD server — register champion model here
+          MLFLOW_PROD_TRACKING_URI:     ${{ secrets.MLFLOW_PROD_TRACKING_URI }}
+          MLFLOW_PROD_USERNAME:         ${{ secrets.MLFLOW_PROD_USERNAME }}
+          MLFLOW_PROD_PASSWORD:         ${{ secrets.MLFLOW_PROD_PASSWORD }}
+          # Script config
+          REGISTERED_NAME:              "mnist_classifier"
+          SECRET_TEST_PATH:             "CICD_MLops/team1_dnn/secret_test_data.npz"
         run: python CICD_MLops/compare_and_promote.py
-
-
