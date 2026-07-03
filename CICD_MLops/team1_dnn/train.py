@@ -2,27 +2,47 @@ import os
 import numpy as np
 import mlflow
 import mlflow.tensorflow
-import dagshub
 import tensorflow as tf
-from tensorflow import keras
+from tensorflow import keras # type: ignore
+from mlflow.models import infer_signature
 from sklearn.model_selection import train_test_split
 import logging
 import warnings
+
+# Load .env file when running locally (ignored if vars already set by CI)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — env vars must be set manually
 
 warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
-# ── DagsHub / MLflow setup ───────────────────────────────────────────────────
+# ── MLflow setup — works identically locally and in CI ───────────────────────
+# Locally:  reads from .env file
+# In CI:    reads from GitHub Actions secrets (injected as env vars)
 
 def setup_mlflow():
-    dagshub.init(
-        repo_owner="e.dejband",
-        repo_name="mlops-dev-tracking",
-        mlflow=True
-    )
-    mlflow.set_experiment("team1_dnn_mnist")
-    logger.info("MLflow connected to DagsHub ✅")
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    username     = os.environ.get("MLFLOW_TRACKING_USERNAME")
+    password     = os.environ.get("MLFLOW_TRACKING_PASSWORD")
+
+    if not tracking_uri:
+        raise EnvironmentError(
+            "MLFLOW_TRACKING_URI not set.\n"
+            "  Local: copy .env.example → .env and fill in your DagsHub values\n"
+            "  CI:    set GitHub Actions secrets"
+        )
+
+    mlflow.set_tracking_uri(tracking_uri)
+    # DagsHub auth via env vars (works both locally and in CI)
+    os.environ["MLFLOW_TRACKING_USERNAME"] = username or ""
+    os.environ["MLFLOW_TRACKING_PASSWORD"] = password or ""
+
+    mlflow.set_experiment("team1_dnn_mnist_Experiment1")
+    logger.info(f"MLflow connected → {tracking_uri} ✅")
 
 
 # ── Data ─────────────────────────────────────────────────────────────────────
@@ -51,8 +71,8 @@ def load_data():
     logger.info(f"Data split → Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
 
     # Save secret test set — used by CI pipeline only, do NOT commit this file
-    np.savez("secret_test_data.npz", X_test=X_test, y_test=y_test)
-    logger.info("Secret test data saved to secret_test_data.npz (do NOT commit this)")
+    # np.savez("secret_test_data.npz", X_test=X_test, y_test=y_test)
+    # logger.info("Secret test data saved to secret_test_data.npz (do NOT commit this)") # save this and put it in your secret in your pipeline
 
     return X_train, X_val, X_test, y_train, y_val, y_test
 
@@ -101,38 +121,48 @@ if __name__ == "__main__":
     X_train, X_val, X_test, y_train, y_val, y_test = load_data()
 
     # Parameter grid — add/change values here to experiment
-    param_grid = [
-        {"epochs": 5,  "batch_size": 128, "learning_rate": 0.001, "dropout_rate": 0.2},
-        {"epochs": 5,  "batch_size": 64,  "learning_rate": 0.001, "dropout_rate": 0.3},
-        {"epochs": 10, "batch_size": 128, "learning_rate": 0.0005,"dropout_rate": 0.2},
-    ]
+    param_grid ={
+        "epochs": [10,20,30,40],
+        "batch_size": [64,256],
+        "learning_rate": [0.001],
+        "dropout_rate": [0.2,0.4]
+        }
 
-    for i, params in enumerate(param_grid):
+    from itertools import product
+    keys, values = zip(*param_grid.items())
+    all_param_combinations = [dict(zip(keys, v)) for v in product(*values)]
+    logger.info(f"Total hyperparameter combinations to try: {len(all_param_combinations)}")
+    for i, params in enumerate(all_param_combinations):
         logger.info("=" * 55)
-        logger.info(f"Run {i+1}/{len(param_grid)} | Params: {params}")
+        logger.info(f"Run {i+1}/{len(all_param_combinations)} | Params: {params}")
 
         model, val_accuracy, val_loss = train(X_train, y_train, X_val, y_val, params)
 
-        with mlflow.start_run(run_name=f"dnn_run_{i+1}"):
+        # Name encodes the key params — unique and descriptive across multiple executions
+        run_name = (
+            f"dnn_e{params['epochs']}"
+            f"_bs{params['batch_size']}"
+            f"_lr{params['learning_rate']}"
+            f"_dr{params['dropout_rate']}"
+        )
+        with mlflow.start_run(run_name=run_name):
             # Log all hyperparameters
             mlflow.log_params(params)
-            mlflow.log_param("architecture", "Dense512-Drop-Dense256-Drop-Softmax10") #TODO automate this
-            
+            mlflow.log_param("architecture", "Dense512-Drop-Dense256-Drop-Softmax10")
+
             # Log validation metrics
             mlflow.log_metric("val_accuracy", val_accuracy)
             mlflow.log_metric("val_loss", val_loss)
 
             mlflow.set_tag("team", "team1_dnn")
             mlflow.set_tag("dataset", "mnist")
+            mlflow.set_tag("approved", "false")  # developer sets to 'true' for the best run
 
-            # Log model to MLflow (saved to DagsHub artifact storage)
-            mlflow.tensorflow.log_model(
-                model=model,
-                name="mnist_dnn_model",
-                registered_model_name="mnist_dnn"  # MLflow auto-versions: v1, v2, v3...
-            )
+            # ── NO model artifact saved during exploration ────────────────────
+            # Saves storage — artifact is only logged when developer approves this run.
+            # To approve after reviewing MLflow UI, run approve_run.py with the run_id.
 
-            logger.info(f"\tRun logged ✅  →  {mlflow.get_artifact_uri()}")
+            logger.info(f"\tRun logged ✅ (params + metrics only, no artifact)")
 
     logger.info("=" * 55)
     logger.info("All runs complete. View at: https://dagshub.com/e.dejband/mlops-dev-tracking.mlflow")

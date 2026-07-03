@@ -182,92 +182,46 @@ Each phase builds on the previous. Develop one phase at a time.
 
 ---
 
-### 🔲 Phase 1 — Team 1 DNN: Local Training + Remote MLflow (DagsHub)
-**Location:** `team1_dnn/`  
-**Goal:** Build the DNN training script for MNIST and log runs to DagsHub (remote MLflow).
+### ✅ Phase 1 — Team 1 DNN: Local Training + Remote DEV MLflow (DagsHub)
+**Location:** `team1_dnn/`
 
-**One-time setup (manual, you do this):**
-- [ ] Create a [DagsHub](https://dagshub.com) account
-- [ ] Create a new repo on DagsHub called `mlops-dev-tracking`
-- [ ] Go to repo → **Remote** tab → **MLflow** → copy the tracking URI + token
-- [ ] Run `pip install dagshub tensorflow mlflow`
+- [x] Create DagsHub account + repo `mlops-dev-tracking`
+- [x] Create `team1_dnn/train.py` — MNIST, 70/20/10 split, DNN, logs to DagsHub DEV
+- [x] Create `team1_dnn/requirements.txt`
+- [x] Create `CICD_MLops/.env.example`
+- [x] Runs visible at `https://dagshub.com/e.dejband/mlops-dev-tracking.mlflow`
 
-**Tasks:**
-- [ ] Create `team1_dnn/train.py`:
-  - Load MNIST via `keras.datasets.mnist`
-  - Apply 70/20/10 split
-  - Save 10% test split to `team1_dnn/secret_test_data.npz` (for CI pipeline later)
-  - Build DNN model (architecture above)
-  - Train with different hyperparameters (epochs, learning rate, dropout)
-  - Log params + metrics + model to DagsHub MLflow
-  - Use `mlflow.tensorflow.log_model(...)` with `name=` (not deprecated `artifact_path`)
-- [ ] Create `.env.example` showing required env vars
-- [ ] Create `team1_dnn/requirements.txt`
-- [ ] Verify: runs visible at `https://dagshub.com/<username>/mlops-dev-tracking.mlflow`
-
-**Key env vars needed (store in `.env`, never commit):**
-```bash
-MLFLOW_TRACKING_URI=https://dagshub.com/<username>/mlops-dev-tracking.mlflow
-MLFLOW_TRACKING_USERNAME=<dagshub_username>
-MLFLOW_TRACKING_PASSWORD=<dagshub_token>
-```
-
-**Simplest DagsHub connection in code:**
-```python
-import dagshub
-import mlflow
-
-dagshub.init(repo_owner="<username>", repo_name="mlops-dev-tracking", mlflow=True)
-mlflow.set_experiment("team1_dnn_mnist")
-# Now mlflow.log_* goes to DagsHub automatically
-```
-
-**Expected result:** Training runs visible on DagsHub MLflow UI, model saved as artifact
+> **Note on manual Staging:** Developers do NOT need to manually register or stage models.
+> The CI pipeline handles registration and promotion to Production automatically.
+> Staging in MLflow UI is only useful for learning what stages mean — not needed in this workflow.
 
 ---
 
-### 🔲 Phase 2 — GitHub Actions CI Pipeline (Re-train + Log)
-**Goal:** Every push to `main` triggers training and logs a new run to PROD MLflow server.
+### ✅ Phase 2 — GitHub Actions CI Pipeline (Re-train + Log to PROD)
+**Location:** `.github/workflows/train_team1_dnn.yml`
 
-**Tasks:**
-- [ ] Create second DagsHub repo: `mlops-prod-tracking`
-- [ ] Store PROD MLflow credentials as GitHub Actions secrets
-- [ ] Store secret test data as GitHub Actions secret (base64 encoded CSV)
-- [ ] Create `.github/workflows/train.yml`
-  - Checkout code
-  - Install dependencies from `requirements.txt`
-  - Run training script
-  - Log to PROD MLflow server
-- [ ] Verify pipeline runs on push and run appears in PROD MLflow UI
-
-**Key files to create:**
-- `.github/workflows/train.yml`
-- `requirements.txt`
-- `phase2_ci_pipeline/train_pipeline.py` — training script adapted for CI
-
-**Expected result:** Push to GitHub → GitHub Actions runs → new MLflow run appears in PROD server
+- [x] Create second DagsHub repo: `mlops-prod-tracking`
+- [x] Create `.github/workflows/train_team1_dnn.yml`
+  - Triggers only on changes to `team1_dnn/` files
+  - Restores secret test data from GitHub secret
+  - Re-trains model, logs to PROD MLflow
+  - Calls shared `compare_and_promote.py`
+- [x] pip cache keyed to `requirements.txt` — fast on repeated runs
+- [ ] Add GitHub Secrets: `MLFLOW_PROD_TRACKING_URI`, `MLFLOW_PROD_USERNAME`, `MLFLOW_PROD_TOKEN`, `SECRET_TEST_DATA_B64`
+- [ ] Create `team1_dnn/.env` locally (copy from `.env.example`, fill token)
+- [ ] Test: push branch → open PR → verify pipeline runs in GitHub Actions
 
 ---
 
-### 🔲 Phase 3 — Quality Gate (Compare + Promote)
-**Goal:** CI pipeline compares new model against current Production. Only promotes if better.
+### ✅ Phase 3 — Quality Gate (Compare + Promote)
+**Location:** `CICD_MLops/compare_and_promote.py` (shared across all teams)
 
-**Tasks:**
-- [ ] Create `compare_and_promote.py` script:
-  - Load new run metrics from PROD MLflow
-  - Load current Production model metrics from Model Registry
-  - If new accuracy > production accuracy → promote to Production
-  - Else → exit with error code (blocks CI)
-- [ ] Add secret test evaluation step (evaluate on secret test data before comparing)
-- [ ] Add `compare_and_promote.py` as a step in `train.yml`
-- [ ] Test: manually make a worse model, verify pipeline blocks it
-- [ ] Test: make a better model, verify it gets promoted
-
-**Key files to create:**
-- `phase3_quality_gate/compare_and_promote.py`
-- Update `.github/workflows/train.yml`
-
-**Expected result:** Only better models make it to Production in MLflow Registry
+- [x] Shared script — both Team 1 and Team 2 compete for same `mnist_classifier` Production slot
+- [x] Evaluates new model on secret test data (developer never sees this data)
+- [x] Hard accuracy floor (default 0.90) — blocks deploy even if "better than nothing"
+- [x] Archives old Production version when new one wins
+- [x] Logs `secret_test_accuracy` back to run for future comparisons
+- [x] Each team's workflow passes `EXPERIMENT_NAME` + `MODEL_ARTIFACT` as env vars
 
 ---
 
@@ -275,19 +229,14 @@ mlflow.set_experiment("team1_dnn_mnist")
 **Goal:** Wrap the Production model in a FastAPI endpoint. Deploy for free.
 
 **Tasks:**
-- [ ] Create `app.py` with FastAPI:
+- [ ] Create `serving/app.py` with FastAPI:
   - `GET /health` → returns status
   - `POST /predict` → accepts 28×28 pixel array (784 values), returns predicted digit + confidence
-  - On startup: loads `models:/mnist_dnn/Production` from PROD MLflow
+  - On startup: loads `models:/mnist_classifier/Production` from PROD MLflow
 - [ ] Test locally with `uvicorn app:app`
-- [ ] Create `Dockerfile` for containerized deployment
+- [ ] Create `serving/Dockerfile`
 - [ ] Deploy to **Render** (free tier) or **HuggingFace Spaces**
-- [ ] Add deployment step to `train.yml` — redeploy after model promotion
-
-**Key files to create:**
-- `phase4_serving/app.py`
-- `phase4_serving/Dockerfile`
-- Update `.github/workflows/train.yml`
+- [ ] Add redeploy step to workflow — triggers after successful model promotion
 
 **Expected result:** Live public endpoint that returns Iris predictions
 

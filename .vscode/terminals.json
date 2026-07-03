@@ -21,7 +21,7 @@
         {
             "name": "👨‍🏫 MLOps teacher",
             "icon": "comment-discussion",
-            "command": "copilot --resume 2428ee98-1059-4f1e-bc6a-e47c4e3d8506"
+            "command": "copilot --resume=2428ee98-1059-4f1e-bc6a-e47c4e3d8506"
         }
     ]
 }
