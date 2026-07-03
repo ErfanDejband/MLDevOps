@@ -1,5 +1,4 @@
 .vscode
-.vscode\terminals.json
 .venv
 __pycache__
 .env
