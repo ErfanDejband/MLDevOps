@@ -81,6 +81,7 @@ print(f"  Val acc  : {staging_run.data.metrics.get('val_accuracy', 'N/A')}")
 
 # ── 3. Evaluate staging model on secret test data ────────────────────────────
 print("\nLoading staging model from DEV and evaluating on secret test data...")
+mlflow.set_tracking_uri(DEV_URI)
 os.environ["MLFLOW_TRACKING_URI"]      = DEV_URI
 os.environ["MLFLOW_TRACKING_USERNAME"] = DEV_USERNAME
 os.environ["MLFLOW_TRACKING_PASSWORD"] = DEV_PASSWORD
@@ -119,12 +120,24 @@ if new_accuracy <= champion_accuracy:
 # ── 7. Register model on PROD and set 'champion' alias ───────────────────────
 print("\n✅ Staging model wins! Registering on PROD and setting as champion...")
 
-# Switch MLflow context to PROD to log the model there
+# Explicitly switch MLflow module to PROD (os.environ alone is not enough)
+mlflow.set_tracking_uri(PROD_URI)
 os.environ["MLFLOW_TRACKING_URI"]      = PROD_URI
 os.environ["MLFLOW_TRACKING_USERNAME"] = PROD_USERNAME
 os.environ["MLFLOW_TRACKING_PASSWORD"] = PROD_PASSWORD
 
-with mlflow.start_run(tags={"team": staging_team, "promoted_from_dev_run": staging_mv.run_id}):
+# Ensure the promotion experiment exists on PROD before creating a run
+PROD_EXPERIMENT = "quality_gate_promotions"
+try:
+    prod_exp = mlflow.get_experiment_by_name(PROD_EXPERIMENT)
+    prod_exp_id = prod_exp.experiment_id if prod_exp else mlflow.create_experiment(PROD_EXPERIMENT)
+except Exception:
+    prod_exp_id = None  # falls back to Default experiment
+
+with mlflow.start_run(
+    experiment_id=prod_exp_id,
+    tags={"team": staging_team, "promoted_from_dev_run": staging_mv.run_id}
+):
     mlflow.log_metric("secret_test_accuracy", new_accuracy)
     mlflow.log_metric("val_accuracy", staging_run.data.metrics.get("val_accuracy", 0))
     mlflow.log_params(staging_run.data.params)
