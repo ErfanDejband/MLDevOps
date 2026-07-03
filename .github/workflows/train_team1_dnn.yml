@@ -24,14 +24,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       # ── 3. Cache pip — re-installs only when requirements.txt changes ────
       - name: Cache pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-team1-${{ hashFiles('CICD_MLops/team1_dnn/requirements.txt') }}
+          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('CICD_MLops/team1_dnn/requirements.txt') }}
 
       # ── 4. Install dependencies ──────────────────────────────────────────
       - name: Install dependencies
