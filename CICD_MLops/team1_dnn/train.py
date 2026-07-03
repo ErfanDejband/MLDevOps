@@ -41,7 +41,7 @@ def setup_mlflow():
     os.environ["MLFLOW_TRACKING_USERNAME"] = username or ""
     os.environ["MLFLOW_TRACKING_PASSWORD"] = password or ""
 
-    mlflow.set_experiment("team1_dnn_mnist_Experiment2")
+    mlflow.set_experiment("team1_dnn_mnist_Experiment3")
     logger.info(f"MLflow connected → {tracking_uri} ✅")
 
 
@@ -181,7 +181,7 @@ if __name__ == "__main__":
             name="mnist_dnn_model",
             signature=signature,
             input_example=sample_input,
-            registered_model_name="mnist_classifier"
+            registered_model_name="mnist_classifier",
         )
 
     # Set 'staging' alias on the newly registered version (replaces deprecated Staging stage)
