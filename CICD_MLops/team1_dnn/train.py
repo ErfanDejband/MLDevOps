@@ -5,7 +5,9 @@ import mlflow.tensorflow
 import tensorflow as tf
 from tensorflow import keras # type: ignore
 from mlflow.models import infer_signature
+from mlflow.tracking import MlflowClient
 from sklearn.model_selection import train_test_split
+from itertools import product
 import logging
 import warnings
 
@@ -20,28 +22,29 @@ warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
-# ── MLflow setup — works identically locally and in CI ───────────────────────
-# Locally:  reads from .env file
-# In CI:    reads from GitHub Actions secrets (injected as env vars)
+REGISTERED_MODEL_NAME = "mnist_classifier"
+CANDIDATE_ALIAS = "team1-candidate"
+
+
+# ── MLflow setup — dev-tracking only; CI/CD talks to both servers itself ────
 
 def setup_mlflow():
-    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
-    username     = os.environ.get("MLFLOW_TRACKING_USERNAME")
-    password     = os.environ.get("MLFLOW_TRACKING_PASSWORD")
+    tracking_uri = os.environ.get("MLFLOW_DEV_TRACKING_URI")
+    username     = os.environ.get("MLFLOW_DEV_USERNAME")
+    password     = os.environ.get("MLFLOW_DEV_PASSWORD")
 
     if not tracking_uri:
         raise EnvironmentError(
-            "MLFLOW_TRACKING_URI not set.\n"
-            "  Local: copy .env.example → .env and fill in your DagsHub values\n"
-            "  CI:    set GitHub Actions secrets"
+            "MLFLOW_DEV_TRACKING_URI not set.\n"
+            "  Copy CICD_MLops/.env.example → CICD_MLops/team1_dnn/.env and fill in\n"
+            "  your mlops-dev-tracking DagsHub values."
         )
 
     mlflow.set_tracking_uri(tracking_uri)
-    # DagsHub auth via env vars (works both locally and in CI)
     os.environ["MLFLOW_TRACKING_USERNAME"] = username or ""
     os.environ["MLFLOW_TRACKING_PASSWORD"] = password or ""
 
-    mlflow.set_experiment("team1_dnn_mnist_Experiment3")
+    mlflow.set_experiment("team1_dnn")
     logger.info(f"MLflow connected → {tracking_uri} ✅")
 
 
@@ -70,9 +73,9 @@ def load_data():
 
     logger.info(f"Data split → Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
 
-    # Save secret test set — used by CI pipeline only, do NOT commit this file
-    # np.savez("secret_test_data.npz", X_test=X_test, y_test=y_test)
-    # logger.info("Secret test data saved to secret_test_data.npz (do NOT commit this)") # save this and put it in your secret in your pipeline
+    # Secret test set — used by the CI/CD quality gate only, never committed
+    np.savez("secret_test_data.npz", X_test=X_test, y_test=y_test)
+    logger.info("Secret test data saved to secret_test_data.npz (do NOT commit this)")
 
     return X_train, X_val, X_test, y_train, y_val, y_test
 
@@ -121,21 +124,19 @@ if __name__ == "__main__":
     X_train, X_val, X_test, y_train, y_val, y_test = load_data()
 
     # Parameter grid — add/change values here to experiment
-    param_grid ={
-        "epochs": [10,20,30,40],
-        "batch_size": [64,256],
+    param_grid = {
+        "epochs": [2, 4, 8],
+        "batch_size": [64, 256],
         "learning_rate": [0.001],
-        "dropout_rate": [0.2,0.4]
-        }
+        "dropout_rate": [0.2, 0.4]
+    }
 
-    from itertools import product
     keys, values = zip(*param_grid.items())
     all_param_combinations = [dict(zip(keys, v)) for v in product(*values)]
     logger.info(f"Total hyperparameter combinations to try: {len(all_param_combinations)}")
-    best_run_id      = None
+    best_run_id       = None
     best_val_accuracy = -1.0
     best_model        = None
-    best_params       = None
 
     for i, params in enumerate(all_param_combinations):
         logger.info("=" * 55)
@@ -156,42 +157,41 @@ if __name__ == "__main__":
             mlflow.log_metric("val_loss", val_loss)
             mlflow.set_tag("team", "team1_dnn")
             mlflow.set_tag("dataset", "mnist")
-            # No artifact saved here — only params + metrics to save storage
+            # No artifact saved here — only params + metrics, to keep the
+            # experiment cheap to browse across the whole grid search
 
-            logger.info(f"\tRun logged ✅ (params + metrics only)")
+            logger.info("\tRun logged ✅ (params + metrics only)")
 
             if val_accuracy > best_val_accuracy:
                 best_val_accuracy = val_accuracy
                 best_run_id       = run.info.run_id
                 best_model        = model
-                best_params       = params
 
     # ── After all runs: save artifact ONLY for the best run ──────────────────
     logger.info("=" * 55)
     logger.info(f"Best run: {best_run_id} | Val accuracy: {best_val_accuracy:.4f}")
-    logger.info("Saving artifact for best run and registering with 'staging' alias...")
+    logger.info(f"Saving artifact for best run and registering as '{CANDIDATE_ALIAS}'...")
 
     with mlflow.start_run(run_id=best_run_id):
         sample_input  = X_val[:5].astype("float32")
         sample_output = best_model.predict(sample_input, verbose=0)
         signature     = infer_signature(sample_input, sample_output)
 
-        model_info = mlflow.tensorflow.log_model(
+        mlflow.tensorflow.log_model(
             model=best_model,
             name="mnist_dnn_model",
             signature=signature,
             input_example=sample_input,
-            registered_model_name="mnist_classifier",
+            registered_model_name=REGISTERED_MODEL_NAME,
         )
 
-    # Set 'staging' alias on the newly registered version (replaces deprecated Staging stage)
-    client = mlflow.MlflowClient()
-    all_versions = client.search_model_versions("name='mnist_classifier'")
+    # Set the team's candidate alias on the newly registered version
+    client = MlflowClient()
+    all_versions = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
     new_version  = next((v for v in all_versions if v.run_id == best_run_id), None)
     if new_version:
-        client.set_registered_model_alias("mnist_classifier", "staging", new_version.version)
-        logger.info(f"✅ mnist_classifier v{new_version.version} → alias 'staging' set")
-        logger.info("Review in MLflow UI. To prefer a different run, set 'staging' alias manually.")
-        logger.info("When ready: git push + open PR to trigger the quality gate pipeline.")
-    
-    logger.info(f"View runs: https://dagshub.com/e.dejband/mlops-dev-tracking.mlflow")
+        client.set_registered_model_alias(REGISTERED_MODEL_NAME, CANDIDATE_ALIAS, new_version.version)
+        logger.info(f"✅ {REGISTERED_MODEL_NAME} v{new_version.version} → alias '{CANDIDATE_ALIAS}' set")
+        logger.info("Review in MLflow UI. When ready: git push + open PR to trigger the quality gate.")
+
+    logger.info("View runs on your MLFLOW_DEV_TRACKING_URI DagsHub repo")
