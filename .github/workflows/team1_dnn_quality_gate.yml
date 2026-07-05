@@ -1,0 +1,99 @@
+name: Team 1 DNN — Quality Gate
+
+# evaluate runs on every PR touching team1_dnn (or the shared gate script) —
+# read-only, reports pass/fail as the PR check, promotes nothing.
+# promote runs only after merge to main — the same script, in promote mode,
+# which is the only thing allowed to write a new champion to prod-tracking.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "CICD_MLops/team1_dnn/**"
+      - "CICD_MLops/shared/**"
+  push:
+    branches: [main]
+    paths:
+      - "CICD_MLops/team1_dnn/**"
+      - "CICD_MLops/shared/**"
+
+jobs:
+  evaluate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('CICD_MLops/team1_dnn/requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r CICD_MLops/team1_dnn/requirements.txt
+
+      - name: Restore secret test data
+        env:
+          SECRET_TEST_DATA_B64: ${{ secrets.SECRET_TEST_DATA_B64 }}
+        run: |
+          echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team1_dnn/secret_test_data.npz
+
+      - name: Placeholder check
+        run: python -c "import sys; sys.path.insert(0, 'CICD_MLops/team1_dnn'); import train"
+
+      - name: Quality Gate — evaluate (dry run, no promotion)
+        env:
+          MLFLOW_DEV_TRACKING_URI: ${{ secrets.MLFLOW_DEV_TRACKING_URI }}
+          MLFLOW_PROD_TRACKING_URI: ${{ secrets.MLFLOW_PROD_TRACKING_URI }}
+          MLFLOW_CI_USERNAME: ${{ secrets.MLFLOW_CI_USERNAME }}
+          MLFLOW_CI_PASSWORD: ${{ secrets.MLFLOW_CI_PASSWORD }}
+          CANDIDATE_ALIAS: team1-candidate
+          REGISTERED_MODEL_NAME: mnist_classifier
+          SECRET_TEST_PATH: CICD_MLops/team1_dnn/secret_test_data.npz
+          ACCURACY_FLOOR: "0.90"
+        run: python CICD_MLops/shared/quality_gate.py --mode evaluate
+
+  promote:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('CICD_MLops/team1_dnn/requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r CICD_MLops/team1_dnn/requirements.txt
+
+      - name: Restore secret test data
+        env:
+          SECRET_TEST_DATA_B64: ${{ secrets.SECRET_TEST_DATA_B64 }}
+        run: |
+          echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team1_dnn/secret_test_data.npz
+
+      - name: Quality Gate — promote (writes to prod-tracking only on pass)
+        env:
+          MLFLOW_DEV_TRACKING_URI: ${{ secrets.MLFLOW_DEV_TRACKING_URI }}
+          MLFLOW_PROD_TRACKING_URI: ${{ secrets.MLFLOW_PROD_TRACKING_URI }}
+          MLFLOW_CI_USERNAME: ${{ secrets.MLFLOW_CI_USERNAME }}
+          MLFLOW_CI_PASSWORD: ${{ secrets.MLFLOW_CI_PASSWORD }}
+          CANDIDATE_ALIAS: team1-candidate
+          REGISTERED_MODEL_NAME: mnist_classifier
+          SECRET_TEST_PATH: CICD_MLops/team1_dnn/secret_test_data.npz
+          ACCURACY_FLOOR: "0.90"
+        run: python CICD_MLops/shared/quality_gate.py --mode promote
