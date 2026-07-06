@@ -125,9 +125,9 @@ if __name__ == "__main__":
 
     # Parameter grid — add/change values here to experiment
     param_grid = {
-        "epochs": [2, 4, 8],
-        "batch_size": [64, 256],
-        "learning_rate": [0.001],
+        "epochs": [10],
+        "batch_size": [ 512],
+        "learning_rate": [0.0001],
         "dropout_rate": [0.2, 0.4]
     }
 
