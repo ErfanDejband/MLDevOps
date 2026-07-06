@@ -88,6 +88,8 @@ def build_model(dropout_rate: float = 0.2) -> keras.Model:
         keras.layers.Dropout(dropout_rate),
         keras.layers.Dense(256, activation="relu"),
         keras.layers.Dropout(dropout_rate),
+        keras.layers.Dense(128, activation="relu"),
+        keras.layers.Dropout(dropout_rate),
         keras.layers.Dense(10, activation="softmax"),
     ])
     return model
@@ -125,9 +127,9 @@ if __name__ == "__main__":
 
     # Parameter grid — add/change values here to experiment
     param_grid = {
-        "epochs": [10],
-        "batch_size": [ 512],
-        "learning_rate": [0.0001],
+        "epochs": [20],
+        "batch_size": [ 128],
+        "learning_rate": [0.001],
         "dropout_rate": [0.2, 0.4]
     }
 
