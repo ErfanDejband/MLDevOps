@@ -130,10 +130,10 @@ if __name__ == "__main__":
 
     # Parameter grid — add/change values here to experiment
     param_grid = {
-        "epochs": [2, 4, 8],
-        "batch_size": [64, 256],
+        "epochs": [8],
+        "batch_size": [64],
         "learning_rate": [0.001],
-        "dropout_rate": [0.2, 0.4]
+        "dropout_rate": [0.4]
     }
 
     keys, values = zip(*param_grid.items())
