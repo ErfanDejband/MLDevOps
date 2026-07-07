@@ -36,7 +36,7 @@ def setup_mlflow():
     if not tracking_uri:
         raise EnvironmentError(
             "MLFLOW_DEV_TRACKING_URI not set.\n"
-            "  Copy CICD_MLops/.env.example → CICD_MLops/team1_dnn/.env and fill in\n"
+            "  Copy CICD_MLops/WIKI/.env.example → CICD_MLops/team1_dnn/.env and fill in\n"
             "  your mlops-dev-tracking DagsHub values."
         )
 
@@ -84,16 +84,34 @@ def load_data():
 
 def build_model(dropout_rate: float = 0.2) -> keras.Model:
     model = keras.Sequential([
-        keras.layers.Dense(512, activation="relu", input_shape=(784,)),
+        keras.layers.Dense(1024, activation="relu", input_shape=(784,)),
+        keras.layers.Dropout(dropout_rate),
+        keras.layers.Dense(512, activation="relu"),
         keras.layers.Dropout(dropout_rate),
         keras.layers.Dense(256, activation="relu"),
         keras.layers.Dropout(dropout_rate),
         keras.layers.Dense(128, activation="relu"),
         keras.layers.Dropout(dropout_rate),
+        keras.layers.Dense(64, activation="relu"),
+        keras.layers.Dropout(dropout_rate),
         keras.layers.Dense(10, activation="softmax"),
     ])
     return model
 
+def model_summary_string(model: keras.Model) -> str:
+    parts = []
+
+    for layer in model.layers:
+        config = layer.get_config()
+
+        if hasattr(layer, "units"):
+            parts.append(f"{layer.__class__.__name__}({config['units']})")
+        elif isinstance(layer, keras.layers.Dropout):
+            parts.append(f"Dropout({config['rate']})")
+        else:
+            parts.append(layer.__class__.__name__)
+
+    return " -> ".join(parts)
 
 # ── Training ─────────────────────────────────────────────────────────────────
 
@@ -127,8 +145,8 @@ if __name__ == "__main__":
 
     # Parameter grid — add/change values here to experiment
     param_grid = {
-        "epochs": [20],
-        "batch_size": [ 128],
+        "epochs": [20,30],
+        "batch_size": [64],
         "learning_rate": [0.001],
         "dropout_rate": [0.2, 0.4]
     }
@@ -139,6 +157,8 @@ if __name__ == "__main__":
     best_run_id       = None
     best_val_accuracy = -1.0
     best_model        = None
+    architecture = model_summary_string(build_model())
+    logger.info(f"Model architecture: {architecture}")
 
     for i, params in enumerate(all_param_combinations):
         logger.info("=" * 55)
@@ -154,7 +174,7 @@ if __name__ == "__main__":
         )
         with mlflow.start_run(run_name=run_name) as run:
             mlflow.log_params(params)
-            mlflow.log_param("architecture", "Dense512-Drop-Dense256-Drop-Softmax10")
+            mlflow.log_param("architecture", architecture)
             mlflow.log_metric("val_accuracy", val_accuracy)
             mlflow.log_metric("val_loss", val_loss)
             mlflow.set_tag("team", "team1_dnn")
