@@ -124,7 +124,10 @@ def main():
     # so a local dry run needs nothing beyond what train.py already uses.
     username          = env("MLFLOW_CI_USERNAME", default=os.environ.get("MLFLOW_DEV_USERNAME"))
     password          = env("MLFLOW_CI_PASSWORD", default=os.environ.get("MLFLOW_DEV_PASSWORD"))
-    candidate_alias   = env("CANDIDATE_ALIAS", default="team1-candidate", required=False)
+    # e.g. "team1_dnn" -> "team1-candidate", "team2_cnn" -> "team2-candidate".
+    # CI always sets CANDIDATE_ALIAS explicitly, so this default only matters locally.
+    default_candidate_alias = f"{args.team.split('_')[0]}-candidate"
+    candidate_alias   = env("CANDIDATE_ALIAS", default=default_candidate_alias, required=False)
     model_name        = env("REGISTERED_MODEL_NAME", default="mnist_classifier", required=False)
     secret_test_path  = env("SECRET_TEST_PATH", default=os.path.join(team_dir, "secret_test_data.npz"), required=False)
     accuracy_floor    = float(env("ACCURACY_FLOOR", default="0.90", required=False))

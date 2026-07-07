@@ -85,8 +85,9 @@ jobs:
         env:
           SECRET_TEST_DATA_B64: ${{ secrets.SECRET_TEST_DATA_B64 }}
         run: |
-          echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team1_dnn/secret_test_data.npz #TODO: use separate repo for secret data
-
+          echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team1_dnn/secret_test_data.npz
+          #TODO: use separate repo for secret data
+          
       - name: Quality Gate — promote (writes to prod-tracking only on pass)
         env:
           MLFLOW_DEV_TRACKING_URI: ${{ secrets.MLFLOW_DEV_TRACKING_URI }}
