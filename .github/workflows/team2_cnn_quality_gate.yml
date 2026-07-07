@@ -1,6 +1,6 @@
-name: Team 1 DNN — Quality Gate
+name: Team 2 CNN — Quality Gate
 
-# evaluate runs on every PR touching team1_dnn (or the shared gate script) —
+# evaluate runs on every PR touching team2_cnn (or the shared gate script) —
 # read-only, reports pass/fail as the PR check, promotes nothing.
 # promote runs only after merge to main — the same script, in promote mode,
 # which is the only thing allowed to write a new champion to prod-tracking.
@@ -8,12 +8,12 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "CICD_MLops/team1_dnn/**"
+      - "CICD_MLops/team2_cnn/**"
       - "CICD_MLops/shared/**"
   push:
     branches: [main]
     paths:
-      - "CICD_MLops/team1_dnn/**"
+      - "CICD_MLops/team2_cnn/**"
       - "CICD_MLops/shared/**"
 
 jobs:
@@ -33,19 +33,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('CICD_MLops/team1_dnn/requirements.txt') }}
+          key: ${{ runner.os }}-pip-team2-py311-${{ hashFiles('CICD_MLops/team2_cnn/requirements.txt') }}
 
       - name: Install dependencies
-        run: pip install -r CICD_MLops/team1_dnn/requirements.txt
+        run: pip install -r CICD_MLops/team2_cnn/requirements.txt
 
       - name: Restore secret test data
         env:
-          SECRET_TEST_DATA_B64: ${{ secrets.SECRET_TEST_DATA_B64 }}
+          SECRET_TEST_DATA_B64: ${{ secrets.SECRET_TEST_DATA_B64_TEAM2 }} 
         run: |
-          echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team1_dnn/secret_test_data.npz
+          echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team2_cnn/secret_test_data.npz
 
       - name: Placeholder check
-        run: python -c "import sys; sys.path.insert(0, 'CICD_MLops/team1_dnn'); import train"
+        run: python -c "import sys; sys.path.insert(0, 'CICD_MLops/team2_cnn'); import train"
 
       - name: Quality Gate — evaluate (dry run, no promotion)
         env:
@@ -53,11 +53,11 @@ jobs:
           MLFLOW_PROD_TRACKING_URI: ${{ secrets.MLFLOW_PROD_TRACKING_URI }}
           MLFLOW_CI_USERNAME: ${{ secrets.MLFLOW_CI_USERNAME }}
           MLFLOW_CI_PASSWORD: ${{ secrets.MLFLOW_CI_PASSWORD }}
-          CANDIDATE_ALIAS: team1-candidate
+          CANDIDATE_ALIAS: team2-candidate
           REGISTERED_MODEL_NAME: mnist_classifier
-          SECRET_TEST_PATH: CICD_MLops/team1_dnn/secret_test_data.npz
+          SECRET_TEST_PATH: CICD_MLops/team2_cnn/secret_test_data.npz
           ACCURACY_FLOOR: "0.90"
-          ARTIFACT_NAME: mnist_dnn_model
+          ARTIFACT_NAME: mnist_cnn_model
         run: python CICD_MLops/shared/quality_gate.py --mode evaluate
 
   promote:
@@ -76,16 +76,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('CICD_MLops/team1_dnn/requirements.txt') }}
+          key: ${{ runner.os }}-pip-team2-py311-${{ hashFiles('CICD_MLops/team2_cnn/requirements.txt') }}
 
       - name: Install dependencies
-        run: pip install -r CICD_MLops/team1_dnn/requirements.txt
+        run: pip install -r CICD_MLops/team2_cnn/requirements.txt
 
       - name: Restore secret test data
         env:
-          SECRET_TEST_DATA_B64: ${{ secrets.SECRET_TEST_DATA_B64 }}
+          SECRET_TEST_DATA_B64: ${{ secrets.SECRET_TEST_DATA_B64_TEAM2 }} 
         run: |
-          echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team1_dnn/secret_test_data.npz #TODO: use separate repo for secret data
+          echo "$SECRET_TEST_DATA_B64" | base64 --decode > CICD_MLops/team2_cnn/secret_test_data.npz
 
       - name: Quality Gate — promote (writes to prod-tracking only on pass)
         env:
@@ -93,9 +93,9 @@ jobs:
           MLFLOW_PROD_TRACKING_URI: ${{ secrets.MLFLOW_PROD_TRACKING_URI }}
           MLFLOW_CI_USERNAME: ${{ secrets.MLFLOW_CI_USERNAME }}
           MLFLOW_CI_PASSWORD: ${{ secrets.MLFLOW_CI_PASSWORD }}
-          CANDIDATE_ALIAS: team1-candidate
+          CANDIDATE_ALIAS: team2-candidate
           REGISTERED_MODEL_NAME: mnist_classifier
-          SECRET_TEST_PATH: CICD_MLops/team1_dnn/secret_test_data.npz
+          SECRET_TEST_PATH: CICD_MLops/team2_cnn/secret_test_data.npz
           ACCURACY_FLOOR: "0.90"
-          ARTIFACT_NAME: mnist_dnn_model
+          ARTIFACT_NAME: mnist_cnn_model
         run: python CICD_MLops/shared/quality_gate.py --mode promote

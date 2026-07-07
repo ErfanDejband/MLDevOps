@@ -1,0 +1,8 @@
+# Secret test data — NEVER commit this file
+secret_test_data.npz
+
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/

@@ -13,15 +13,6 @@ from mlflow.exceptions import MlflowException
 # Resolved relative to this file, not the caller's CWD, so this script works
 # the same whether you run it from the repo root or from CICD_MLops/shared.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TEAM1_DNN_DIR = os.path.join(SCRIPT_DIR, "..", "team1_dnn")
-
-# Local dry runs: load team1_dnn/.env explicitly. No-op in CI — there's no
-# .env file there, only real GitHub Actions secrets as env vars.
-try:
-    from dotenv import load_dotenv
-    load_dotenv(dotenv_path=os.path.join(TEAM1_DNN_DIR, ".env"))
-except ImportError:
-    pass
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -71,7 +62,7 @@ def log_gate_result(mode, candidate_version, candidate_accuracy, champion_versio
         mlflow.log_param("passed", passed)
 
 
-def promote_candidate(dev_client, prod_client, model_name, candidate_version, candidate_model, candidate_accuracy, X_test, team_tag):
+def promote_candidate(dev_client, prod_client, model_name, candidate_version, candidate_model, candidate_accuracy, X_test, team_tag, artifact_name):
     source_run = dev_client.get_run(candidate_version.run_id)
 
     mlflow.set_experiment(PRODUCTION_EXPERIMENT)
@@ -88,7 +79,7 @@ def promote_candidate(dev_client, prod_client, model_name, candidate_version, ca
 
         mlflow.tensorflow.log_model(
             model=candidate_model,
-            name="mnist_dnn_model",
+            name=artifact_name,
             signature=signature,
             input_example=sample_input,
             registered_model_name=model_name,
@@ -106,7 +97,24 @@ def promote_candidate(dev_client, prod_client, model_name, candidate_version, ca
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["evaluate", "promote"], required=True)
+    parser.add_argument(
+        "--team", default="team1_dnn",
+        help="Team folder name (team1_dnn, team2_cnn, ...). Local dry runs only: "
+             "picks which team's .env to load and the default secret-test-data path. "
+             "Ignored in CI, where credentials and SECRET_TEST_PATH already come from "
+             "the workflow's env vars.",
+    )
     args = parser.parse_args()
+
+    team_dir = os.path.join(SCRIPT_DIR, "..", args.team)
+
+    # Local dry runs: load <team>/.env explicitly. No-op in CI — there's no
+    # .env file there, only real GitHub Actions secrets as env vars.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=os.path.join(team_dir, ".env"))
+    except ImportError:
+        pass
 
     dev_uri           = env("MLFLOW_DEV_TRACKING_URI")
     prod_uri          = env("MLFLOW_PROD_TRACKING_URI")
@@ -118,8 +126,12 @@ def main():
     password          = env("MLFLOW_CI_PASSWORD", default=os.environ.get("MLFLOW_DEV_PASSWORD"))
     candidate_alias   = env("CANDIDATE_ALIAS", default="team1-candidate", required=False)
     model_name        = env("REGISTERED_MODEL_NAME", default="mnist_classifier", required=False)
-    secret_test_path  = env("SECRET_TEST_PATH", default=os.path.join(TEAM1_DNN_DIR, "secret_test_data.npz"), required=False)
+    secret_test_path  = env("SECRET_TEST_PATH", default=os.path.join(team_dir, "secret_test_data.npz"), required=False)
     accuracy_floor    = float(env("ACCURACY_FLOOR", default="0.90", required=False))
+    # e.g. "team1_dnn" -> "mnist_dnn_model", "team2_cnn" -> "mnist_cnn_model".
+    # CI always sets ARTIFACT_NAME explicitly, so this default only matters locally.
+    default_artifact_name = f"mnist_{args.team.rsplit('_', 1)[-1]}_model"
+    artifact_name     = env("ARTIFACT_NAME", default=default_artifact_name, required=False)
 
     os.environ["MLFLOW_TRACKING_USERNAME"] = username
     os.environ["MLFLOW_TRACKING_PASSWORD"] = password
@@ -160,7 +172,7 @@ def main():
     log_gate_result(args.mode, candidate_version, candidate_accuracy, champion_version, champion_accuracy, passed, accuracy_floor)
 
     if args.mode == "promote" and passed:
-        promote_candidate(dev_client, prod_client, model_name, candidate_version, candidate_model, candidate_accuracy, X_test, team_tag)
+        promote_candidate(dev_client, prod_client, model_name, candidate_version, candidate_model, candidate_accuracy, X_test, team_tag, artifact_name)
 
     sys.exit(0 if passed else 1)
 
