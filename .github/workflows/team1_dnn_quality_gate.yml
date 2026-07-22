@@ -33,7 +33,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('CICD_MLops/team1_dnn/requirements.txt') }}
+          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('requirements.txt', 'CICD_MLops/team1_dnn/requirements.txt') }}
 
       - name: Install dependencies
         run: pip install -r CICD_MLops/team1_dnn/requirements.txt
@@ -76,7 +76,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('CICD_MLops/team1_dnn/requirements.txt') }}
+          key: ${{ runner.os }}-pip-team1-py311-${{ hashFiles('requirements.txt', 'CICD_MLops/team1_dnn/requirements.txt') }}
 
       - name: Install dependencies
         run: pip install -r CICD_MLops/team1_dnn/requirements.txt

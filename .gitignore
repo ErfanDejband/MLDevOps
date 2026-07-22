@@ -1,4 +1,37 @@
-.vscode
-.venv
-__pycache__
+# ── Private teaching layer ───────────────────────────────────────────────────
+# Personal lessons/notes. Deliberately never pushed — the public repo should
+# read as a finished project, not as a course notebook.
+Class/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# ── Secrets & credentials ────────────────────────────────────────────────────
 .env
+*.env
+!.env.example
+
+# ── Data ─────────────────────────────────────────────────────────────────────
+# Held-out evaluation data must never enter git — DVC owns it, and its
+# integrity depends on developers not being able to read it from the repo.
+secret_test_data.npz
+*.pkl
+
+# Raw/processed datasets are DVC-tracked; only the .dvc pointer files are
+# committed, never the bytes themselves.
+/data/raw/
+/data/processed/
+
+# ── MLflow local leftovers ───────────────────────────────────────────────────
+mlruns/
+mlartifacts/
+mlflow.db
+
+# ── Editors / OS ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

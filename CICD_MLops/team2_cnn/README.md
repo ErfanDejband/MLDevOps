@@ -11,12 +11,20 @@ the quality gate, the promotion rule, the workflow shape — lives in
 
 ## 1. One-time setup
 
+The virtual environment lives at the **repo root**, not in this folder — one
+environment serves the whole project, and both teams plus the shared quality
+gate are guaranteed to run against identical package versions:
+
 ```bash
-cd CICD_MLops/team2_cnn
+# from the repo root
 python -m venv .venv
 .venv\Scripts\activate        # Windows
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
+
+`requirements.txt` in this folder inherits the root `requirements.txt` — add
+Team 2-specific packages there, but never re-pin a base dependency, or your
+training environment can drift from the one the quality gate scores you in.
 
 Copy the template and fill in your **dev-tracking** DagsHub credentials:
 

@@ -21,6 +21,13 @@ CICD_MLops/
 └── WIKI/          design docs: ARCHITECTURE.md, plan_to_impliment.md, .env.example
 ```
 
+Dependencies and the virtual environment live at the **repo root**, one level up:
+`requirements.txt` is the platform base (MLflow, DVC, TensorFlow, NumPy) and each
+team's `requirements.txt` inherits it with `-r ../../requirements.txt`. Teams add
+their own packages, but never re-pin a base one — that's how a team's training
+environment is kept identical to the environment the shared quality gate scores
+their model in.
+
 ## Why it's built this way
 
 - **Two DagsHub MLflow servers, not one.** `mlops-dev-tracking` is where

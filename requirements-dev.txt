@@ -1,0 +1,15 @@
+# ── Local development requirements ───────────────────────────────────────────
+# The platform base, plus tooling you only want on a developer machine / in the
+# CI lint step — never needed to train or serve a model.
+#
+# Install (from the repo root, into the root .venv):
+#   pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+# Linting / formatting
+ruff>=0.6.0
+
+# Tests — currently the CI "placeholder check" is just an import smoke test;
+# this is the dependency that lets it grow into real unit tests.
+pytest>=8.0.0
